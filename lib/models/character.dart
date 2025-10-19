@@ -4,9 +4,9 @@ class Character {
   String physicalTraits;
   String description;
   String personality;
-  String? imagePath;
-  String raceId;
-  Map<String, dynamic> customFields; // Por si algunas razas requieren campos extra
+  String? imagePath;                 // base64, url o path local
+  String raceId;                     // raza seleccionada
+  Map<String, dynamic> customFields; // valores por característica de la raza
 
   Character({
     required this.id,
@@ -19,3 +19,4 @@ class Character {
     Map<String, dynamic>? customFields,
   }) : customFields = customFields ?? {};
 }
+

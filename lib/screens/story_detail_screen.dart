@@ -24,6 +24,16 @@ class StoryDetailScreen extends StatefulWidget {
 }
 
 class _StoryDetailScreenState extends State<StoryDetailScreen> {
+  // ================== Helpers ==================
+
+  Race? _raceById(String? id) {
+    try {
+      return widget.story.races.firstWhere((r) => r.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Imagen de historia
   void _actualizaImagen(String img) {
     setState(() {
@@ -44,37 +54,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     }
   }
 
-  // Crear nuevo personaje (general, sin fijar raza)
-  void goToNewCharacterForm() async {
-    if (widget.story.races.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Primero crea al menos una raza.')),
-      );
-      return;
-    }
-
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (ctx) => CharacterForm(
-          races: widget.story.races,
-          initialRace: widget.story.races.first,
-        ),
-      ),
-    );
-
-    if (result != null && result is Character) {
-      setState(() {
-        final race = widget.story.races.firstWhere(
-              (r) => r.id == result.raceId,
-          orElse: () => widget.story.races.first,
-        );
-        race.characters.add(result);
-      });
-    }
-  }
-
-  // Crear nuevo personaje para una raza específica
+  // Crear nuevo personaje para una raza específica (se mantiene el flujo dentro de cada raza)
   void _newCharacterForRace(Race race) async {
     final result = await Navigator.push(
       context,
@@ -178,7 +158,8 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  // -------- Editor inline de raza (funcional) --------
+  // ================== Editor / Vista de Raza ==================
+
   void _openRaceEditor(Race race) {
     showModalBottomSheet(
       context: context,
@@ -383,6 +364,266 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
+  Future<void> _confirmDeleteRace(Race race) async {
+    final count = race.characters.length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar raza'),
+        content: Text(
+          count == 0
+              ? '¿Seguro que quieres eliminar la raza "${race.name}"?'
+              : 'La raza "${race.name}" tiene $count personaje${count == 1 ? '' : 's'}. '
+              'Se eliminarán también. ¿Deseas continuar?',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      setState(() {
+        widget.story.races.removeWhere((r) => r.id == race.id);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Raza "${race.name}" eliminada')),
+      );
+    }
+  }
+
+  // ================== Vista / Edición de Personaje ==================
+
+  void _showCharacterPreview(Race race, Character ch) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            left: 16, right: 16, top: 12,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(ch.name, style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 12),
+                GestureDetector(
+                  onTap: () => _showImagePreview(ch.imagePath),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: _buildAnyImage(ch.imagePath, w: double.infinity, h: 180, fit: BoxFit.cover),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  (ch.description ?? '').isEmpty ? 'Sin descripción.' : (ch.description ?? ''),
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    FilledButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _openCharacterEditor(race, ch);
+                      },
+                      icon: const Icon(Icons.edit),
+                      label: const Text('Editar'),
+                    ),
+                    const SizedBox(width: 8),
+                    TextButton.icon(
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _confirmDeleteCharacter(race, ch);
+                      },
+                      icon: const Icon(Icons.delete_forever, color: Colors.red),
+                      label: const Text('Eliminar', style: TextStyle(color: Colors.red)),
+                    ),
+                    const Spacer(),
+                    OutlinedButton.icon(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close),
+                      label: const Text('Cerrar'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _openCharacterEditor(Race currentRace, Character ch) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      builder: (ctx) {
+        final nameCtrl = TextEditingController(text: ch.name);
+        final descCtrl = TextEditingController(text: ch.description ?? '');
+        String? tempImage = ch.imagePath;
+        Race selectedRace = _raceById(ch.raceId) ?? currentRace;
+
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+            left: 16, right: 16, top: 12,
+          ),
+          child: StatefulBuilder(
+            builder: (ctx2, setModal) {
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Editar Personaje', style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () => _showImagePreview(tempImage),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: _buildAnyImage(tempImage, w: 72, h: 72),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ImageSelector(
+                            onImageSelected: (img) => setModal(() => tempImage = img),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Nombre',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: descCtrl,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        labelText: 'Descripción',
+                        border: OutlineInputBorder(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Raza',
+                        border: OutlineInputBorder(),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<Race>(
+                          value: selectedRace,
+                          items: widget.story.races.map((r) {
+                            return DropdownMenuItem<Race>(
+                              value: r,
+                              child: Text(r.name),
+                            );
+                          }).toList(),
+                          onChanged: (r) {
+                            if (r != null) setModal(() => selectedRace = r);
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          final name = nameCtrl.text.trim();
+                          if (name.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('El nombre es obligatorio')),
+                            );
+                            return;
+                          }
+
+                          setState(() {
+                            // Actualiza datos básicos
+                            ch.name = name;
+                            ch.description = descCtrl.text.trim();
+                            ch.imagePath = tempImage;
+
+                            // Mover de raza si cambió
+                            if (ch.raceId != selectedRace.id) {
+                              // quitar de la raza actual
+                              final oldRace = _raceById(ch.raceId) ?? currentRace;
+                              oldRace.characters.removeWhere((c) => c.id == ch.id);
+
+                              // asignar nueva
+                              ch.raceId = selectedRace.id;
+                              selectedRace.characters.add(ch);
+                            }
+                          });
+
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Personaje actualizado')),
+                          );
+                        },
+                        icon: const Icon(Icons.save),
+                        label: const Text('Guardar cambios'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmDeleteCharacter(Race race, Character ch) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar personaje'),
+        content: Text('¿Seguro que quieres eliminar a "${ch.name}"?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      setState(() {
+        race.characters.removeWhere((c) => c.id == ch.id);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Personaje "${ch.name}" eliminado')),
+      );
+    }
+  }
+
+  // ================== UI ==================
+
   @override
   Widget build(BuildContext context) {
     final thumb = ClipRRect(
@@ -393,6 +634,9 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Detalles de la Historia'),
+        actions: [
+          // (Opcional) Eliminar historia: se implementaría en Home como pediste.
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(18),
@@ -443,10 +687,20 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                         ),
                         title: Text(race.name),
                         subtitle: Text(race.description),
-                        trailing: TextButton.icon(
-                          onPressed: () => _openRaceEditor(race),
-                          icon: const Icon(Icons.edit),
-                          label: const Text('Editar'),
+                        trailing: Wrap(
+                          spacing: 6,
+                          children: [
+                            IconButton(
+                              tooltip: 'Editar',
+                              onPressed: () => _openRaceEditor(race),
+                              icon: const Icon(Icons.edit),
+                            ),
+                            IconButton(
+                              tooltip: 'Eliminar raza',
+                              onPressed: () => _confirmDeleteRace(race),
+                              icon: const Icon(Icons.delete_forever, color: Colors.red),
+                            ),
+                          ],
                         ),
                       ),
                     );
@@ -457,7 +711,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
 
             const SizedBox(width: 24),
 
-            // Columna derecha: info + BOTONES + PERSONAJES AGRUPADOS POR RAZA
+            // Columna derecha: info + PERSONAJES AGRUPADOS POR RAZA
             Expanded(
               flex: 18,
               child: ListView(
@@ -471,17 +725,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     widget.story.description,
                     style: TextStyle(fontSize: 17, color: Colors.grey[700]),
                   ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.person_add_alt_1),
-                        label: const Text("Nuevo Personaje"),
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent[700]),
-                        onPressed: goToNewCharacterForm,
-                      ),
-                    ],
-                  ),
+
                   const SizedBox(height: 20),
                   const Text(
                     "Personajes por raza",
@@ -511,6 +755,12 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                               icon: const Icon(Icons.add),
                               label: const Text('Agregar'),
                             ),
+                            const SizedBox(width: 6),
+                            IconButton(
+                              tooltip: 'Eliminar raza',
+                              onPressed: () => _confirmDeleteRace(race),
+                              icon: const Icon(Icons.delete_forever, color: Colors.red),
+                            ),
                           ],
                         ),
                         children: [
@@ -522,11 +772,44 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                           ...race.characters.map((ch) {
                             return Card(
                               margin: const EdgeInsets.only(bottom: 8),
-                              child: CharacterTile(
-                                character: ch,
-                                onTap: () {
-                                  // Aquí podrías abrir detalle/edición del personaje
-                                },
+                              child: ListTile(
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                leading: GestureDetector(
+                                  onTap: () => _showImagePreview(ch.imagePath),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: _buildAnyImage(ch.imagePath, w: 44, h: 44),
+                                  ),
+                                ),
+                                title: Text(ch.name),
+                                subtitle: Text(
+                                  (ch.description ?? '').isEmpty
+                                      ? 'Sin descripción'
+                                      : (ch.description!.length > 80
+                                      ? '${ch.description!.substring(0, 80)}...'
+                                      : ch.description!),
+                                ),
+                                onTap: () => _showCharacterPreview(race, ch), // Ver descripción + imagen
+                                trailing: Wrap(
+                                  spacing: 4,
+                                  children: [
+                                    IconButton(
+                                      tooltip: 'Ver',
+                                      onPressed: () => _showCharacterPreview(race, ch),
+                                      icon: const Icon(Icons.visibility),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Editar',
+                                      onPressed: () => _openCharacterEditor(race, ch),
+                                      icon: const Icon(Icons.edit),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Eliminar',
+                                      onPressed: () => _confirmDeleteCharacter(race, ch),
+                                      icon: const Icon(Icons.delete_forever, color: Colors.red),
+                                    ),
+                                  ],
+                                ),
                               ),
                             );
                           }),

@@ -77,7 +77,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.dispose();
   }
 
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;

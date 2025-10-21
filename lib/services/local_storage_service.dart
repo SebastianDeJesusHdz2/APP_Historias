@@ -78,7 +78,6 @@ class LocalStorageService {
   // -------- Preferencias simples (opcional) --------
   static const _prefsBox = 'prefsBox';
 
-
   static Future<void> setPrefBool(String key, bool value) async {
     final box = await Hive.openBox(_prefsBox);
     await box.put(key, value);

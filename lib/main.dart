@@ -9,6 +9,7 @@ import 'models/story.dart';
 // Registra tus adapters si usas Hive TypeAdapters personalizados
 
 // Provider: ¡aquí puedes expandirlo para sincronizar con Hive!
+// Provider: sincronizable con Hive si lo deseas
 class StoryProvider with ChangeNotifier {
   final List<Story> _stories = [];
 
@@ -16,12 +17,31 @@ class StoryProvider with ChangeNotifier {
 
   void addStory(Story story) {
     _stories.add(story);
-    notifyListeners();
-    // Aquí podrías persistir en Hive
+    notifyListeners(); // refresca consumidores
+    // Persistencia opcional con Hive aquí
+  }
+
+  // NUEVO: elimina por índice (para Dismissible en Home)
+  void removeStoryAt(int index) {
+    if (index >= 0 && index < _stories.length) {
+      _stories.removeAt(index);
+      notifyListeners(); // notifica cambios a la UI
+      // Persistencia opcional con Hive aquí
+    }
+  }
+
+  // NUEVO: elimina por id (útil desde StoryDetailScreen)
+  void removeStoryById(String id) {
+    final i = _stories.indexWhere((s) => s.id == id);
+    if (i != -1) {
+      _stories.removeAt(i);
+      notifyListeners(); // notifica cambios a la UI
+      // Persistencia opcional con Hive aquí
+    }
   }
 
   void refresh() {
-    notifyListeners();
+    notifyListeners(); // fuerza rebuild sin cambiar datos
   }
 }
 

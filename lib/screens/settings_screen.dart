@@ -4,7 +4,6 @@ import '../services/local_storage_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
-
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
@@ -14,7 +13,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _loading = true;
   bool _hideKey = true;
 
-  // Preferencias básicas (si ya las usas)
   bool _showDeleteHint = true;
   bool _confirmBeforeDelete = true;
 
@@ -25,40 +23,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _init() async {
-    // Carga key si existe
     final key = await LocalStorageService.getApiKey();
     final showHint = await LocalStorageService.getPrefBool('showDeleteHint') ?? true;
     final confirmDel = await LocalStorageService.getPrefBool('confirmBeforeDelete') ?? true;
 
-    if (mounted) {
-      setState(() {
-        apiKeyController.text = key ?? '';
-        _showDeleteHint = showHint;
-        _confirmBeforeDelete = confirmDel;
-        _loading = false;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      apiKeyController.text = key ?? '';
+      _showDeleteHint = showHint;
+      _confirmBeforeDelete = confirmDel;
+      _loading = false;
+    });
   }
 
   Future<void> _saveApiKey() async {
     await LocalStorageService.saveApiKey(apiKeyController.text.trim());
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('API key guardada localmente.')),
-      );
-    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('API key guardada localmente.')),
+    );
   }
 
-  Future<void> _clearLocalCaches() async {
-    await LocalStorageService.clearAllData(); // Vacía todas las cajas (incluida apiKey)
-    if (mounted) {
-      setState(() {
-        apiKeyController.clear(); // deja el campo en blanco inmediatamente
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cachés y API key borradas.')),
-      );
-    }
+  Future<bool> _confirm(String title, String message) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Continuar')),
+        ],
+      ),
+    ) ??
+        false;
+  }
+
+  // Limpia solo API key + imágenes/copias locales. NO borra historias.
+  Future<void> _clearCachesOnly() async {
+    final ok = await _confirm(
+      'Borrar cachés',
+      'Se borrarán la API key y las imágenes locales de la aplicación. Tus historias permanecerán intactas.',
+    );
+    if (!ok) return;
+
+    await LocalStorageService.clearApiKeyBox();
+    await LocalStorageService.clearImagesDir();
+
+    if (!mounted) return;
+    setState(() => apiKeyController.clear());
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Cachés limpiadas. Historias conservadas.')),
+    );
+  }
+
+  // Borra únicamente historias (no API key).
+  Future<void> _clearStoriesOnly() async {
+    final ok = await _confirm(
+      'Borrar historias',
+      'Esto eliminará todas las historias guardadas. Esta acción no se puede deshacer.',
+    );
+    if (!ok) return;
+
+    await LocalStorageService.clearStoriesOnly();
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Historias eliminadas.')),
+    );
   }
 
   Future<void> _toggleShowDeleteHint(bool v) async {
@@ -80,7 +112,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-
     return Scaffold(
       appBar: AppBar(title: const Text('Configuración')),
       body: _loading
@@ -88,10 +119,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           : ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
-            child: Text('API externa', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ),
+          const _SectionTitle('API externa'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Card(
@@ -109,7 +137,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       autocorrect: false,
                       decoration: InputDecoration(
                         labelText: 'API key',
-                        helperText: 'Se almacena localmente con Hive; puedes borrarla desde esta pantalla.',
+                        helperText: 'Se guarda localmente con Hive. Puedes limpiarla abajo.',
                         prefixIcon: const Icon(Icons.vpn_key),
                         suffixIcon: IconButton(
                           onPressed: () => setState(() => _hideKey = !_hideKey),
@@ -144,10 +172,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
-            child: Text('Preferencias', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ),
+          const _SectionTitle('Preferencias'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Card(
@@ -175,24 +200,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
 
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
-            child: Text('Datos locales', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ),
+          const _SectionTitle('Datos locales'),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Card(
               elevation: 2,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              child: ListTile(
-                leading: const Icon(Icons.delete_forever, color: Colors.red),
-                title: const Text('Borrar historias y cachés locales'),
-                subtitle: const Text('Incluye la API key guardada'),
-                trailing: FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: cs.error, foregroundColor: cs.onError),
-                  onPressed: _clearLocalCaches,
-                  child: const Text('Borrar todo'),
-                ),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.cleaning_services_rounded, color: Colors.teal),
+                    title: const Text('Borrar cachés (API + imágenes)'),
+                    subtitle: const Text('No elimina historias. Limpia API key y copias de imágenes.'),
+                    trailing: FilledButton(onPressed: _clearCachesOnly, child: const Text('Limpiar')),
+                  ),
+                  const Divider(height: 0),
+                  ListTile(
+                    leading: const Icon(Icons.delete_forever, color: Colors.red),
+                    title: const Text('Borrar todas las historias'),
+                    subtitle: const Text('Acción destructiva. Las historias no se pueden recuperar.'),
+                    trailing: FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: cs.error, foregroundColor: cs.onError),
+                      onPressed: _clearStoriesOnly,
+                      child: const Text('Eliminar'),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
@@ -202,4 +235,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-
+class _SectionTitle extends StatelessWidget {
+  final String text;
+  const _SectionTitle(this.text);
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 18, 16, 8),
+      child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+    );
+  }
+}

@@ -1,84 +1,97 @@
+// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:hive/hive.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'screens/home_screen.dart';
-import 'screens/settings_screen.dart';
-import 'models/story.dart';
-// Registra tus adapters si usas Hive TypeAdapters personalizados
+// Usa imports por paquete para evitar tipos duplicados
+import 'package:apphistorias/services/local_storage_service.dart';
+import 'package:apphistorias/screens/home_screen.dart';
+import 'package:apphistorias/screens/settings_screen.dart';
+import 'package:apphistorias/models/story.dart';
 
-// Provider: ¡aquí puedes expandirlo para sincronizar con Hive!
-// Provider: sincronizable con Hive si lo deseas
+// Provider con persistencia en Hive (JSON a través del LocalStorageService)
 class StoryProvider with ChangeNotifier {
   final List<Story> _stories = [];
-
   List<Story> get stories => _stories;
 
-  void addStory(Story story) {
-    _stories.add(story);
-    notifyListeners(); // refresca consumidores
-    // Persistencia opcional con Hive aquí
+  // Carga inicial desde disco
+  Future<void> init() async {
+    final loaded = await LocalStorageService.getStories();
+    _stories
+      ..clear()
+      ..addAll(loaded);
+    notifyListeners();
   }
 
-  // NUEVO: elimina por índice (para Dismissible en Home)
-  void removeStoryAt(int index) {
+  Future<void> _persist() async {
+    await LocalStorageService.saveStories(_stories);
+  }
+
+  Future<void> addStory(Story story) async {
+    _stories.add(story);
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> removeStoryAt(int index) async {
     if (index >= 0 && index < _stories.length) {
       _stories.removeAt(index);
-      notifyListeners(); // notifica cambios a la UI
-      // Persistencia opcional con Hive aquí
+      await _persist();
+      notifyListeners();
     }
   }
 
-  // NUEVO: elimina por id (útil desde StoryDetailScreen)
-  void removeStoryById(String id) {
+  Future<void> removeStoryById(String id) async {
     final i = _stories.indexWhere((s) => s.id == id);
     if (i != -1) {
       _stories.removeAt(i);
-      notifyListeners(); // notifica cambios a la UI
-      // Persistencia opcional con Hive aquí
+      await _persist();
+      notifyListeners();
     }
   }
 
-  void refresh() {
-    notifyListeners(); // fuerza rebuild sin cambiar datos
+  // Útil cuando edites una historia/raza/personaje en detalle
+  Future<void> saveAll() async {
+    await _persist();
+    notifyListeners();
   }
+
+  void refresh() => notifyListeners();
 }
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Inicializa Hive para almacenamiento local (solo si usas Hive)
+
+  // Inicializa Hive en la carpeta de documentos de la app
   final documents = await getApplicationDocumentsDirectory();
   Hive.init(documents.path);
 
-  // Registra adapters si los tienes (por ejemplo, Hive.registerAdapter(StoryAdapter());)
-  // Hive.registerAdapter(StoryAdapter());
+  // Carga datos antes de pintar la UI
+  final storyProvider = StoryProvider();
+  await storyProvider.init();
 
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => StoryProvider(),
-      child: MainThemeSwitcher(),
+    ChangeNotifierProvider.value(
+      value: storyProvider,
+      child: const MainThemeSwitcher(),
     ),
   );
 }
 
 class MainThemeSwitcher extends StatefulWidget {
+  const MainThemeSwitcher({super.key});
   @override
   State<MainThemeSwitcher> createState() => _MainThemeSwitcherState();
 }
 
 class _MainThemeSwitcherState extends State<MainThemeSwitcher> {
   bool _isDark = false;
-
-  void _toggleTheme(bool value) {
-    setState(() {
-      _isDark = value;
-    });
-  }
+  void _toggleTheme(bool value) => setState(() => _isDark = value);
 
   @override
   Widget build(BuildContext context) {
-    // Define tu paleta ideal aquí
+    // Paleta
     const Color azulPrincipal = Color(0xFF2874A6);
     const Color verdeAccent = Color(0xFF43C59E);
     const Color coral = Color(0xFFFF6F61);
@@ -90,7 +103,7 @@ class _MainThemeSwitcherState extends State<MainThemeSwitcher> {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.light(
+        colorScheme: const ColorScheme.light(
           primary: azulPrincipal,
           secondary: verdeAccent,
           surface: Colors.white,
@@ -98,12 +111,12 @@ class _MainThemeSwitcherState extends State<MainThemeSwitcher> {
           error: coral,
         ),
         scaffoldBackgroundColor: bgClaro,
-        appBarTheme: AppBarTheme(
-            backgroundColor: bgClaro,
-            foregroundColor: azulPrincipal,
-            elevation: 1
+        appBarTheme: const AppBarTheme(
+          backgroundColor: bgClaro,
+          foregroundColor: azulPrincipal,
+          elevation: 1,
         ),
-        floatingActionButtonTheme: FloatingActionButtonThemeData(
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
           backgroundColor: azulPrincipal,
           foregroundColor: Colors.white,
         ),
@@ -111,13 +124,13 @@ class _MainThemeSwitcherState extends State<MainThemeSwitcher> {
           style: ElevatedButton.styleFrom(
             backgroundColor: coral,
             foregroundColor: Colors.white,
-            textStyle: TextStyle(fontWeight: FontWeight.bold),
+            textStyle: const TextStyle(fontWeight: FontWeight.bold),
           ),
         ),
       ),
       darkTheme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.dark(
+        colorScheme: const ColorScheme.dark(
           primary: azulPrincipal,
           secondary: verdeAccent,
           surface: Color(0xFF252C39),
@@ -125,12 +138,12 @@ class _MainThemeSwitcherState extends State<MainThemeSwitcher> {
           error: coral,
         ),
         scaffoldBackgroundColor: bgOscuro,
-        appBarTheme: AppBarTheme(
-            backgroundColor: bgOscuro,
-            foregroundColor: azulPrincipal,
-            elevation: 1
+        appBarTheme: const AppBarTheme(
+          backgroundColor: bgOscuro,
+          foregroundColor: azulPrincipal,
+          elevation: 1,
         ),
-        floatingActionButtonTheme: FloatingActionButtonThemeData(
+        floatingActionButtonTheme: const FloatingActionButtonThemeData(
           backgroundColor: azulPrincipal,
           foregroundColor: Colors.white,
         ),
@@ -138,7 +151,7 @@ class _MainThemeSwitcherState extends State<MainThemeSwitcher> {
           style: ElevatedButton.styleFrom(
             backgroundColor: coral,
             foregroundColor: Colors.white,
-            textStyle: TextStyle(fontWeight: FontWeight.bold),
+            textStyle: const TextStyle(fontWeight: FontWeight.bold),
           ),
         ),
       ),
@@ -148,12 +161,8 @@ class _MainThemeSwitcherState extends State<MainThemeSwitcher> {
         isDark: _isDark,
       ),
       routes: {
-        '/settings': (context) => SettingsScreen(),
+        '/settings': (context) => const SettingsScreen(),
       },
     );
   }
 }
-
-
-
-

@@ -1,8 +1,10 @@
-import 'dart:io';
+// lib/screens/story_detail_screen.dart
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
-// USA SIEMPRE imports tipo package: para evitar duplicados de tipos
+// Imports por paquete para evitar duplicados
 import 'package:apphistorias/models/story.dart';
 import 'package:apphistorias/models/race.dart';
 import 'package:apphistorias/models/character.dart';
@@ -16,8 +18,7 @@ import 'package:apphistorias/widgets/image_selector.dart';
 
 class StoryDetailScreen extends StatefulWidget {
   final Story story;
-
-  const StoryDetailScreen({Key? key, required this.story}) : super(key: key);
+  const StoryDetailScreen({super.key, required this.story});
 
   @override
   State<StoryDetailScreen> createState() => _StoryDetailScreenState();
@@ -25,7 +26,6 @@ class StoryDetailScreen extends StatefulWidget {
 
 class _StoryDetailScreenState extends State<StoryDetailScreen> {
   // ================== Helpers ==================
-
   Race? _raceById(String? id) {
     try {
       return widget.story.races.firstWhere((r) => r.id == id);
@@ -34,28 +34,24 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     }
   }
 
-  // Imagen de historia
+  // Imagen de historia (solo actualiza; persiste fuera con Provider.saveAll si lo usas)
   void _actualizaImagen(String img) {
-    setState(() {
-      widget.story.imagePath = img;
-    });
+    setState(() => widget.story.imagePath = img);
   }
 
-  // Crear nueva raza (usa RaceForm con ImageSelector para IA/Subir)
-  void goToNewRaceForm() async {
+  // Crear nueva raza
+  Future<void> goToNewRaceForm() async {
     final newRace = await Navigator.push(
       context,
       MaterialPageRoute(builder: (ctx) => const RaceForm()),
     );
     if (newRace != null && newRace is Race) {
-      setState(() {
-        widget.story.races.add(newRace);
-      });
+      setState(() => widget.story.races.add(newRace));
     }
   }
 
-  // Crear nuevo personaje para una raza específica (se mantiene el flujo dentro de cada raza)
-  void _newCharacterForRace(Race race) async {
+  // Crear nuevo personaje para una raza específica
+  Future<void> _newCharacterForRace(Race race) async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
@@ -65,29 +61,36 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         ),
       ),
     );
-
     if (result != null && result is Character) {
-      setState(() {
-        race.characters.add(result);
-      });
+      setState(() => race.characters.add(result));
     }
   }
 
   // -------- Helpers Imagen (historia/raza/personaje) --------
   Widget _buildAnyImage(String? img, {double w = 120, double h = 120, BoxFit fit = BoxFit.cover}) {
     if (img == null || img.isEmpty) {
-      return Icon(Icons.image, size: h, color: Colors.grey.shade300);
-    }
-    final isBase64 = img.length > 100 && !img.startsWith('http') && !img.contains(Platform.pathSeparator);
-
-    if (isBase64) {
-      return Image.memory(
-        base64Decode(img),
+      return Container(
         width: w,
         height: h,
-        fit: fit,
-        errorBuilder: (ctx, err, stack) => Icon(Icons.broken_image, color: Colors.red, size: h),
+        color: Colors.black12,
+        child: Icon(Icons.image, size: h * 0.45, color: Colors.grey.shade400),
       );
+    }
+    final looksBase64 = img.length > 100 && !img.startsWith('http') && !img.contains(Platform.pathSeparator);
+
+    if (looksBase64) {
+      try {
+        final bytes = base64Decode(img);
+        return Image.memory(
+          bytes,
+          width: w,
+          height: h,
+          fit: fit,
+          errorBuilder: (ctx, err, stack) => _broken(w, h),
+        );
+      } catch (_) {
+        return _broken(w, h);
+      }
     }
     if (img.startsWith('http')) {
       return Image.network(
@@ -95,17 +98,26 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         width: w,
         height: h,
         fit: fit,
-        errorBuilder: (ctx, err, stack) => Icon(Icons.broken_image, color: Colors.red, size: h),
+        errorBuilder: (ctx, err, stack) => _broken(w, h),
       );
     }
+    final file = File(img);
+    if (!file.existsSync()) return _broken(w, h);
     return Image.file(
-      File(img),
+      file,
       width: w,
       height: h,
       fit: fit,
-      errorBuilder: (ctx, err, stack) => Icon(Icons.broken_image, color: Colors.red, size: h),
+      errorBuilder: (ctx, err, stack) => _broken(w, h),
     );
   }
+
+  Widget _broken(double w, double h) => Container(
+    width: w,
+    height: h,
+    color: Colors.black12,
+    child: Icon(Icons.broken_image, size: h * 0.45, color: Colors.redAccent),
+  );
 
   void _showImagePreview(String? img) {
     if (img == null || img.isEmpty) return;
@@ -114,31 +126,38 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       context: context,
       barrierDismissible: true,
       builder: (_) {
-        final isBase64 = img.length > 100 && !img.startsWith('http') && !img.contains(Platform.pathSeparator);
+        final looksBase64 = img.length > 100 && !img.startsWith('http') && !img.contains(Platform.pathSeparator);
 
         Widget largeImage;
-        if (isBase64) {
-          largeImage = InteractiveViewer(
-            minScale: 0.8,
-            maxScale: 4.0,
-            child: Image.memory(base64Decode(img), fit: BoxFit.contain),
-          );
+        if (looksBase64) {
+          try {
+            largeImage = InteractiveViewer(
+              minScale: 0.8,
+              maxScale: 4.0,
+              child: Image.memory(base64Decode(img), fit: BoxFit.contain),
+            );
+          } catch (_) {
+            largeImage = _broken(double.infinity, 220);
+          }
         } else if (img.startsWith('http')) {
           largeImage = InteractiveViewer(
             minScale: 0.8,
             maxScale: 4.0,
-            child: Image.network(img, fit: BoxFit.contain),
+            child: Image.network(img, fit: BoxFit.contain, errorBuilder: (_, __, ___) => _broken(double.infinity, 220)),
           );
         } else {
+          final f = File(img);
           largeImage = InteractiveViewer(
             minScale: 0.8,
             maxScale: 4.0,
-            child: Image.file(File(img), fit: BoxFit.contain),
+            child: f.existsSync()
+                ? Image.file(f, fit: BoxFit.contain)
+                : _broken(double.infinity, 220),
           );
         }
 
         return Dialog(
-          backgroundColor: Colors.black.withOpacity(0.2),
+          backgroundColor: Colors.black.withOpacity(0.6),
           insetPadding: const EdgeInsets.all(12),
           child: Stack(
             children: [
@@ -159,19 +178,21 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
   }
 
   // ================== Editor / Vista de Raza ==================
-
   void _openRaceEditor(Race race) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.9,
+      ),
       builder: (ctx) {
         final nameCtrl = TextEditingController(text: race.name);
         final descCtrl = TextEditingController(text: race.description);
         String? tempImage = race.imagePath;
 
-        // Copia editable de fields
         final fields = List<RaceFieldDef>.from(race.fields);
 
         return Padding(
@@ -181,17 +202,8 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           ),
           child: StatefulBuilder(
             builder: (ctx2, setModal) {
-              void addField() {
-                setModal(() {
-                  fields.add(RaceFieldDef(key: '', label: '', type: RaceFieldType.text));
-                });
-              }
-
-              void removeField(int i) {
-                setModal(() {
-                  fields.removeAt(i);
-                });
-              }
+              void addField() => setModal(() => fields.add(RaceFieldDef(key: '', label: '', type: RaceFieldType.text)));
+              void removeField(int i) => setModal(() => fields.removeAt(i));
 
               return SingleChildScrollView(
                 child: Column(
@@ -199,8 +211,6 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   children: [
                     Text('Editar Raza', style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 12),
-
-                    // Imagen + selector IA/Subir
                     Row(
                       children: [
                         GestureDetector(
@@ -212,51 +222,34 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: ImageSelector(
-                            onImageSelected: (img) => setModal(() => tempImage = img),
-                          ),
+                          child: ImageSelector(onImageSelected: (img) => setModal(() => tempImage = img)),
                         ),
                       ],
                     ),
-
                     const SizedBox(height: 12),
                     TextField(
                       controller: nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Nombre',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder()),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: descCtrl,
                       maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Descripción',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: 'Descripción', border: OutlineInputBorder()),
                     ),
-
                     const SizedBox(height: 16),
                     Row(
                       children: [
                         const Text('Características', style: TextStyle(fontWeight: FontWeight.bold)),
                         const Spacer(),
-                        TextButton.icon(
-                          onPressed: addField,
-                          icon: const Icon(Icons.add),
-                          label: const Text('Agregar'),
-                        )
+                        TextButton.icon(onPressed: addField, icon: const Icon(Icons.add), label: const Text('Agregar')),
                       ],
                     ),
-
-                    // Lista editable de características
                     ...fields.asMap().entries.map((e) {
                       final i = e.key;
                       final f = e.value;
                       final keyCtrl = TextEditingController(text: f.key);
                       final labelCtrl = TextEditingController(text: f.label);
-
                       return Card(
                         margin: const EdgeInsets.only(bottom: 10),
                         child: Padding(
@@ -268,10 +261,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                                   Expanded(
                                     child: TextField(
                                       controller: labelCtrl,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Etiqueta (ej: Tamaño de orejas)',
-                                        border: OutlineInputBorder(),
-                                      ),
+                                      decoration: const InputDecoration(labelText: 'Etiqueta', border: OutlineInputBorder()),
                                       onChanged: (v) => f.label = v,
                                     ),
                                   ),
@@ -279,10 +269,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                                   Expanded(
                                     child: TextField(
                                       controller: keyCtrl,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Clave (ej: tamano_orejas)',
-                                        border: OutlineInputBorder(),
-                                      ),
+                                      decoration: const InputDecoration(labelText: 'Clave', border: OutlineInputBorder()),
                                       onChanged: (v) => f.key = v,
                                     ),
                                   ),
@@ -295,22 +282,11 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                                   const SizedBox(width: 10),
                                   DropdownButton<RaceFieldType>(
                                     value: f.type,
-                                    onChanged: (v) {
-                                      if (v != null) setModal(() => f.type = v);
-                                    },
+                                    onChanged: (v) => v != null ? setModal(() => f.type = v) : null,
                                     items: const [
-                                      DropdownMenuItem(
-                                        value: RaceFieldType.text,
-                                        child: Text('Texto'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: RaceFieldType.number,
-                                        child: Text('Número'),
-                                      ),
-                                      DropdownMenuItem(
-                                        value: RaceFieldType.boolean,
-                                        child: Text('Sí/No'),
-                                      ),
+                                      DropdownMenuItem(value: RaceFieldType.text, child: Text('Texto')),
+                                      DropdownMenuItem(value: RaceFieldType.number, child: Text('Número')),
+                                      DropdownMenuItem(value: RaceFieldType.boolean, child: Text('Sí/No')),
                                     ],
                                   ),
                                   const Spacer(),
@@ -326,26 +302,20 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                         ),
                       );
                     }),
-
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         onPressed: () {
                           if (nameCtrl.text.trim().isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('El nombre es obligatorio')),
-                            );
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El nombre es obligatorio')));
                             return;
                           }
-                          // Persistimos cambios en la raza original
                           setState(() {
                             race.name = nameCtrl.text.trim();
                             race.description = descCtrl.text.trim();
                             race.imagePath = tempImage;
-                            race.fields = fields
-                                .where((f) => f.key.trim().isNotEmpty && f.label.trim().isNotEmpty)
-                                .toList();
+                            race.fields = fields.where((f) => f.key.trim().isNotEmpty && f.label.trim().isNotEmpty).toList();
                           });
                           Navigator.pop(ctx);
                         },
@@ -370,40 +340,31 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Eliminar raza'),
-        content: Text(
-          count == 0
-              ? '¿Seguro que quieres eliminar la raza "${race.name}"?'
-              : 'La raza "${race.name}" tiene $count personaje${count == 1 ? '' : 's'}. '
-              'Se eliminarán también. ¿Deseas continuar?',
-        ),
+        content: Text(count == 0
+            ? '¿Seguro que quieres eliminar la raza "${race.name}"?'
+            : 'La raza "${race.name}" tiene $count personaje${count == 1 ? '' : 's'}. Se eliminarán también.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Eliminar'),
-          ),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('Eliminar')),
         ],
       ),
     );
     if (ok == true) {
-      setState(() {
-        widget.story.races.removeWhere((r) => r.id == race.id);
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Raza "${race.name}" eliminada')),
-      );
+      setState(() => widget.story.races.removeWhere((r) => r.id == race.id));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Raza "${race.name}" eliminada')));
     }
   }
 
   // ================== Vista / Edición de Personaje ==================
-
   void _showCharacterPreview(Race race, Character ch) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
       builder: (ctx) {
         return Padding(
           padding: EdgeInsets.only(
@@ -424,36 +385,17 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                Text(
-                  (ch.description ?? '').isEmpty ? 'Sin descripción.' : (ch.description ?? ''),
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
+                Text((ch.description ?? '').isEmpty ? 'Sin descripción.' : (ch.description ?? ''), style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 16),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    FilledButton.icon(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _openCharacterEditor(race, ch);
-                      },
-                      icon: const Icon(Icons.edit),
-                      label: const Text('Editar'),
-                    ),
-                    const SizedBox(width: 8),
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.pop(ctx);
-                        _confirmDeleteCharacter(race, ch);
-                      },
-                      icon: const Icon(Icons.delete_forever, color: Colors.red),
-                      label: const Text('Eliminar', style: TextStyle(color: Colors.red)),
-                    ),
-                    const Spacer(),
-                    OutlinedButton.icon(
-                      onPressed: () => Navigator.pop(ctx),
-                      icon: const Icon(Icons.close),
-                      label: const Text('Cerrar'),
-                    ),
+                    FilledButton.icon(onPressed: () { Navigator.pop(ctx); _openCharacterEditor(race, ch); }, icon: const Icon(Icons.edit), label: const Text('Editar')),
+                    TextButton.icon(onPressed: () { Navigator.pop(ctx); _confirmDeleteCharacter(race, ch); },
+                        icon: const Icon(Icons.delete_forever, color: Colors.red),
+                        label: const Text('Eliminar', style: TextStyle(color: Colors.red))),
+                    OutlinedButton.icon(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close), label: const Text('Cerrar')),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -469,8 +411,10 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
       builder: (ctx) {
         final nameCtrl = TextEditingController(text: ch.name);
         final descCtrl = TextEditingController(text: ch.description ?? '');
@@ -500,48 +444,21 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                           ),
                         ),
                         const SizedBox(width: 12),
-                        Expanded(
-                          child: ImageSelector(
-                            onImageSelected: (img) => setModal(() => tempImage = img),
-                          ),
-                        ),
+                        Expanded(child: ImageSelector(onImageSelected: (img) => setModal(() => tempImage = img))),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Nombre',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
+                    TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder())),
                     const SizedBox(height: 10),
-                    TextField(
-                      controller: descCtrl,
-                      maxLines: 3,
-                      decoration: const InputDecoration(
-                        labelText: 'Descripción',
-                        border: OutlineInputBorder(),
-                      ),
-                    ),
+                    TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Descripción', border: OutlineInputBorder())),
                     const SizedBox(height: 12),
                     InputDecorator(
-                      decoration: const InputDecoration(
-                        labelText: 'Raza',
-                        border: OutlineInputBorder(),
-                      ),
+                      decoration: const InputDecoration(labelText: 'Raza', border: OutlineInputBorder()),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<Race>(
                           value: selectedRace,
-                          items: widget.story.races.map((r) {
-                            return DropdownMenuItem<Race>(
-                              value: r,
-                              child: Text(r.name),
-                            );
-                          }).toList(),
-                          onChanged: (r) {
-                            if (r != null) setModal(() => selectedRace = r);
-                          },
+                          items: widget.story.races.map((r) => DropdownMenuItem<Race>(value: r, child: Text(r.name))).toList(),
+                          onChanged: (r) => r != null ? setModal(() => selectedRace = r) : null,
                         ),
                       ),
                     ),
@@ -552,34 +469,23 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                         onPressed: () {
                           final name = nameCtrl.text.trim();
                           if (name.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('El nombre es obligatorio')),
-                            );
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El nombre es obligatorio')));
                             return;
                           }
-
                           setState(() {
-                            // Actualiza datos básicos
                             ch.name = name;
                             ch.description = descCtrl.text.trim();
                             ch.imagePath = tempImage;
-
-                            // Mover de raza si cambió
                             if (ch.raceId != selectedRace.id) {
-                              // quitar de la raza actual
                               final oldRace = _raceById(ch.raceId) ?? currentRace;
                               oldRace.characters.removeWhere((c) => c.id == ch.id);
-
-                              // asignar nueva
                               ch.raceId = selectedRace.id;
                               selectedRace.characters.add(ch);
                             }
                           });
-
                           Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Personaje actualizado')),
-                          );
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Personaje actualizado')));
                         },
                         icon: const Icon(Icons.save),
                         label: const Text('Guardar cambios'),
@@ -604,225 +510,153 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         content: Text('¿Seguro que quieres eliminar a "${ch.name}"?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Eliminar'),
-          ),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('Eliminar')),
         ],
       ),
     );
     if (ok == true) {
-      setState(() {
-        race.characters.removeWhere((c) => c.id == ch.id);
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Personaje "${ch.name}" eliminado')),
-      );
+      setState(() => race.characters.removeWhere((c) => c.id == ch.id));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Personaje "${ch.name}" eliminado')));
     }
   }
 
   // ================== UI ==================
-
   @override
   Widget build(BuildContext context) {
-    final thumb = ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: _buildAnyImage(widget.story.imagePath),
-    );
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Detalles de la Historia'),
-        actions: [
-          // (Opcional) Eliminar historia: se implementaría en Home como pediste.
+    final leftColumn = [
+      GestureDetector(
+        onTap: () => _showImagePreview(widget.story.imagePath),
+        child: ClipRRect(borderRadius: BorderRadius.circular(16), child: _buildAnyImage(widget.story.imagePath)),
+      ),
+      const SizedBox(height: 12),
+      ImageSelector(onImageSelected: _actualizaImagen),
+      const SizedBox(height: 20),
+      Row(
+        children: [
+          const Text('Razas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+          const Spacer(),
+          TextButton.icon(onPressed: goToNewRaceForm, icon: const Icon(Icons.add), label: const Text('Nueva Raza')),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Columna izquierda: imagen + selector (historia) + LISTA DE RAZAS
-            Expanded(
-              flex: 12,
-              child: ListView(
-                children: [
-                  GestureDetector(
-                    onTap: () => _showImagePreview(widget.story.imagePath),
-                    child: thumb,
-                  ),
-                  const SizedBox(height: 12),
-                  ImageSelector(onImageSelected: _actualizaImagen),
-                  const SizedBox(height: 20),
-                  Row(
-                    children: [
-                      const Text(
-                        'Razas',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-                      ),
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed: goToNewRaceForm,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Nueva Raza'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-
-                  if (widget.story.races.isEmpty)
-                    const Text('Aún no hay razas. Agrega la primera.'),
-                  ...widget.story.races.map((race) {
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 10),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        leading: GestureDetector(
-                          onTap: () => _showImagePreview(race.imagePath),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: _buildAnyImage(race.imagePath, w: 48, h: 48),
-                          ),
-                        ),
-                        title: Text(race.name),
-                        subtitle: Text(race.description),
-                        trailing: Wrap(
-                          spacing: 6,
-                          children: [
-                            IconButton(
-                              tooltip: 'Editar',
-                              onPressed: () => _openRaceEditor(race),
-                              icon: const Icon(Icons.edit),
-                            ),
-                            IconButton(
-                              tooltip: 'Eliminar raza',
-                              onPressed: () => _confirmDeleteRace(race),
-                              icon: const Icon(Icons.delete_forever, color: Colors.red),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  }),
-                ],
-              ),
+      const SizedBox(height: 6),
+      if (widget.story.races.isEmpty) const Text('Aún no hay razas. Agrega la primera.'),
+      ...widget.story.races.map((race) {
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          child: ListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            leading: GestureDetector(
+              onTap: () => _showImagePreview(race.imagePath),
+              child: ClipRRect(borderRadius: BorderRadius.circular(8), child: _buildAnyImage(race.imagePath, w: 48, h: 48)),
             ),
-
-            const SizedBox(width: 24),
-
-            // Columna derecha: info + PERSONAJES AGRUPADOS POR RAZA
-            Expanded(
-              flex: 18,
-              child: ListView(
-                children: [
-                  Text(
-                    widget.story.title,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 26),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    widget.story.description,
-                    style: TextStyle(fontSize: 17, color: Colors.grey[700]),
-                  ),
-
-                  const SizedBox(height: 20),
-                  const Text(
-                    "Personajes por raza",
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-                  ),
-                  const SizedBox(height: 8),
-
-                  if (widget.story.races.isEmpty)
-                    const Text('No hay razas; agrega una para comenzar con personajes.'),
-                  ...widget.story.races.map((race) {
-                    final count = race.characters.length;
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ExpansionTile(
-                        leading: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: _buildAnyImage(race.imagePath, w: 36, h: 36),
-                        ),
-                        title: Text(race.name),
-                        subtitle: Text('$count personaje${count == 1 ? '' : 's'}'),
-                        childrenPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextButton.icon(
-                              onPressed: () => _newCharacterForRace(race),
-                              icon: const Icon(Icons.add),
-                              label: const Text('Agregar'),
-                            ),
-                            const SizedBox(width: 6),
-                            IconButton(
-                              tooltip: 'Eliminar raza',
-                              onPressed: () => _confirmDeleteRace(race),
-                              icon: const Icon(Icons.delete_forever, color: Colors.red),
-                            ),
-                          ],
-                        ),
-                        children: [
-                          if (race.characters.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.only(bottom: 12),
-                              child: Text('Sin personajes en esta raza.'),
-                            ),
-                          ...race.characters.map((ch) {
-                            return Card(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                leading: GestureDetector(
-                                  onTap: () => _showImagePreview(ch.imagePath),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: _buildAnyImage(ch.imagePath, w: 44, h: 44),
-                                  ),
-                                ),
-                                title: Text(ch.name),
-                                subtitle: Text(
-                                  (ch.description ?? '').isEmpty
-                                      ? 'Sin descripción'
-                                      : (ch.description!.length > 80
-                                      ? '${ch.description!.substring(0, 80)}...'
-                                      : ch.description!),
-                                ),
-                                onTap: () => _showCharacterPreview(race, ch), // Ver descripción + imagen
-                                trailing: Wrap(
-                                  spacing: 4,
-                                  children: [
-                                    IconButton(
-                                      tooltip: 'Ver',
-                                      onPressed: () => _showCharacterPreview(race, ch),
-                                      icon: const Icon(Icons.visibility),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Editar',
-                                      onPressed: () => _openCharacterEditor(race, ch),
-                                      icon: const Icon(Icons.edit),
-                                    ),
-                                    IconButton(
-                                      tooltip: 'Eliminar',
-                                      onPressed: () => _confirmDeleteCharacter(race, ch),
-                                      icon: const Icon(Icons.delete_forever, color: Colors.red),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                    );
-                  }),
-                ],
-              ),
+            title: Text(race.name, overflow: TextOverflow.ellipsis),
+            subtitle: Text(race.description, maxLines: 2, overflow: TextOverflow.ellipsis),
+            trailing: Wrap(
+              spacing: 6,
+              children: [
+                IconButton(tooltip: 'Editar', onPressed: () => _openRaceEditor(race), icon: const Icon(Icons.edit)),
+                IconButton(tooltip: 'Eliminar raza', onPressed: () => _confirmDeleteRace(race), icon: const Icon(Icons.delete_forever, color: Colors.red)),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      }),
+    ];
+
+    final rightColumn = [
+      Text(widget.story.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 26), overflow: TextOverflow.ellipsis),
+      const SizedBox(height: 8),
+      Text(widget.story.description, style: TextStyle(fontSize: 17, color: Colors.grey[700])),
+      const SizedBox(height: 20),
+      const Text('Personajes por raza', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 20)),
+      const SizedBox(height: 8),
+      if (widget.story.races.isEmpty) const Text('No hay razas; agrega una para comenzar con personajes.'),
+      ...widget.story.races.map((race) {
+        final count = race.characters.length;
+        return Card(
+          margin: const EdgeInsets.only(bottom: 12),
+          child: ExpansionTile(
+            leading: ClipRRect(borderRadius: BorderRadius.circular(8), child: _buildAnyImage(race.imagePath, w: 36, h: 36)),
+            title: Text(race.name, overflow: TextOverflow.ellipsis),
+            subtitle: Text('$count personaje${count == 1 ? '' : 's'}'),
+            childrenPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            trailing: Wrap(
+              spacing: 8,
+              children: [
+                TextButton.icon(onPressed: () => _newCharacterForRace(race), icon: const Icon(Icons.add), label: const Text('Agregar')),
+                IconButton(tooltip: 'Eliminar raza', onPressed: () => _confirmDeleteRace(race), icon: const Icon(Icons.delete_forever, color: Colors.red)),
+              ],
+            ),
+            children: [
+              if (race.characters.isEmpty)
+                const Padding(padding: EdgeInsets.only(bottom: 12), child: Text('Sin personajes en esta raza.')),
+              ...race.characters.map((ch) {
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    leading: GestureDetector(
+                      onTap: () => _showImagePreview(ch.imagePath),
+                      child: ClipRRect(borderRadius: BorderRadius.circular(8), child: _buildAnyImage(ch.imagePath, w: 44, h: 44)),
+                    ),
+                    title: Text(ch.name, overflow: TextOverflow.ellipsis),
+                    subtitle: Text(
+                      (ch.description ?? '').isEmpty
+                          ? 'Sin descripción'
+                          : (ch.description!.length > 80 ? '${ch.description!.substring(0, 80)}...' : ch.description!),
+                    ),
+                    onTap: () => _showCharacterPreview(race, ch),
+                    trailing: Wrap(
+                      spacing: 6,
+                      children: [
+                        IconButton(tooltip: 'Ver', onPressed: () => _showCharacterPreview(race, ch), icon: const Icon(Icons.visibility)),
+                        IconButton(tooltip: 'Editar', onPressed: () => _openCharacterEditor(race, ch), icon: const Icon(Icons.edit)),
+                        IconButton(tooltip: 'Eliminar', onPressed: () => _confirmDeleteCharacter(race, ch), icon: const Icon(Icons.delete_forever, color: Colors.red)),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+        );
+      }),
+    ];
+
+    // Responsive: móvil 1 columna; tablet/desktop 2 columnas
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobile = constraints.maxWidth < 700;
+        return Scaffold(
+          appBar: AppBar(title: const Text('Detalles de la Historia')),
+          body: Padding(
+            padding: const EdgeInsets.all(16),
+            child: isMobile
+                ? ListView(
+              children: [
+                ...leftColumn,
+                const SizedBox(height: 24),
+                ...rightColumn,
+              ],
+            )
+                : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  flex: 12,
+                  child: ListView(children: leftColumn),
+                ),
+                const SizedBox(width: 24),
+                Expanded(
+                  flex: 18,
+                  child: ListView(children: rightColumn),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

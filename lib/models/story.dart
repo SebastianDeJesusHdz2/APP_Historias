@@ -1,4 +1,5 @@
-import 'package:apphistorias/models/race.dart';
+// lib/models/story.dart
+import 'race.dart';
 
 class Story {
   String id;
@@ -15,5 +16,21 @@ class Story {
     List<Race>? races,
   }) : races = races ?? [];
 
-// Agrega métodos para serialización si usas Hive/SQFlite
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'title': title,
+    'description': description,
+    'imagePath': imagePath,
+    'races': races.map((r) => r.toMap()).toList(),
+  };
+
+  factory Story.fromMap(Map<String, dynamic> m) => Story(
+    id: m['id'] as String,
+    title: m['title'] as String,
+    description: m['description'] as String,
+    imagePath: m['imagePath'] as String?,
+    races: (m['races'] as List? ?? [])
+        .map((x) => Race.fromMap((x as Map).cast<String, dynamic>()))
+        .toList(),
+  );
 }

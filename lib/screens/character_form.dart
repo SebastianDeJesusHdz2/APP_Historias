@@ -1,17 +1,20 @@
-import 'dart:io';
+// lib/screens/character_form.dart
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/character.dart';
 import '../models/race.dart';
 import '../widgets/image_selector.dart';
+import '../services/local_storage_service.dart'; // para copiar/guardar imagen en carpeta de la app
 
 class CharacterForm extends StatefulWidget {
   final List<Race> races;      // Razas disponibles
   final Race? initialRace;     // Opcional: raza preseleccionada
 
-  const CharacterForm({required this.races, this.initialRace, super.key});
+  const CharacterForm({super.key, required this.races, this.initialRace});
 
   @override
   _CharacterFormState createState() => _CharacterFormState();
@@ -24,7 +27,7 @@ class _CharacterFormState extends State<CharacterForm> {
   final personalityController = TextEditingController();
 
   Race? _selectedRace;
-  String? _image; // base64, url, path
+  String? _image; // base64, url, path (or null)
 
   // Para campos dinámicos
   final Map<String, TextEditingController> _textCtrls = {};
@@ -44,12 +47,13 @@ class _CharacterFormState extends State<CharacterForm> {
     physicalTraitsController.dispose();
     descriptionController.dispose();
     personalityController.dispose();
-    _textCtrls.values.forEach((c) => c.dispose());
-    _numberCtrls.values.forEach((c) => c.dispose());
+    for (final c in _textCtrls.values) c.dispose();
+    for (final c in _numberCtrls.values) c.dispose();
     super.dispose();
   }
 
   void _onImageSelected(String v) {
+    // Recibe base64/url/ruta. Persistimos al guardar; aquí solo preview.
     setState(() => _image = v);
   }
 
@@ -84,13 +88,10 @@ class _CharacterFormState extends State<CharacterForm> {
   }
 
   Widget _buildRaceFields() {
-    if (_selectedRace == null) {
-      return const Text('No hay razas disponibles.');
-    }
+    if (_selectedRace == null) return const Text('No hay razas disponibles.');
     if (_selectedRace!.fields.isEmpty) {
       return const Text('Esta raza no define características adicionales.');
     }
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: _selectedRace!.fields.map((f) {
@@ -129,8 +130,34 @@ class _CharacterFormState extends State<CharacterForm> {
     );
   }
 
-  void _save() {
-    if (nameController.text.trim().isEmpty) {
+  Future<String?> _persistImageIfNeeded(String? img) async {
+    if (img == null || img.isEmpty) return null;
+
+    // Heurística de base64
+    final isBase64 = img.length > 100 &&
+        !img.startsWith('http') &&
+        !img.contains(Platform.pathSeparator);
+
+    try {
+      if (isBase64) {
+        // Guarda base64 como archivo en carpeta de la app
+        return await LocalStorageService.saveBase64ToImage(img);
+      } else if (img.startsWith('http')) {
+        // Descarga a carpeta de la app
+        return await LocalStorageService.downloadImageToAppDir(Uri.parse(img));
+      } else {
+        // Ruta local: copia a carpeta propia de la app para tener ruta estable
+        return await LocalStorageService.copyImageToAppDir(img);
+      }
+    } catch (_) {
+      // Si algo falla, no bloquees el guardado; solo retorna null para usar placeholder
+      return null;
+    }
+  }
+
+  Future<void> _save() async {
+    final name = nameController.text.trim();
+    if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('El nombre es obligatorio.')),
       );
@@ -151,24 +178,27 @@ class _CharacterFormState extends State<CharacterForm> {
       if (raw.isEmpty) {
         customFields[k] = null;
       } else {
-        // Intenta parsear a num
         final n = num.tryParse(raw);
-        customFields[k] = n ?? raw; // si falla, guarda como texto
+        customFields[k] = n ?? raw;
       }
     });
     _boolValues.forEach((k, v) => customFields[k] = v);
 
+    // Persiste imagen a carpeta de la app y guarda la ruta final estable
+    final persistedPath = await _persistImageIfNeeded(_image);
+
     final character = Character(
       id: const Uuid().v4(),
-      name: nameController.text.trim(),
+      name: name,
       physicalTraits: physicalTraitsController.text.trim(),
       description: descriptionController.text.trim(),
       personality: personalityController.text.trim(),
-      imagePath: _image,
+      imagePath: persistedPath, // ya es ruta segura o null
       raceId: _selectedRace!.id,
       customFields: customFields,
     );
 
+    if (!mounted) return;
     Navigator.pop(context, character);
   }
 
@@ -180,7 +210,6 @@ class _CharacterFormState extends State<CharacterForm> {
         padding: const EdgeInsets.all(16.0),
         child: ListView(
           children: [
-            // Imagen del personaje (IA/Subir)
             Row(
               children: [
                 ClipRRect(
@@ -195,7 +224,6 @@ class _CharacterFormState extends State<CharacterForm> {
             ),
             const SizedBox(height: 16),
 
-            // Datos base
             TextField(
               controller: nameController,
               decoration: const InputDecoration(
@@ -230,9 +258,10 @@ class _CharacterFormState extends State<CharacterForm> {
             ),
             const SizedBox(height: 16),
 
-            // Selección de raza
             DropdownButtonFormField<Race>(
-              value: _selectedRace,
+              value: _selectedRace != null && widget.races.contains(_selectedRace!)
+                  ? _selectedRace
+                  : (widget.races.isNotEmpty ? widget.races.first : null),
               items: widget.races
                   .map((r) => DropdownMenuItem(value: r, child: Text(r.name)))
                   .toList(),
@@ -244,7 +273,6 @@ class _CharacterFormState extends State<CharacterForm> {
             ),
             const SizedBox(height: 16),
 
-            // Campos dinámicos por raza
             _buildRaceFields(),
 
             const SizedBox(height: 18),
@@ -271,31 +299,42 @@ class _CharacterFormState extends State<CharacterForm> {
         child: const Icon(Icons.image, size: 32),
       );
     }
+
     final isBase64 = img.length > 100 &&
         !img.startsWith('http') &&
         !img.contains(Platform.pathSeparator);
 
     if (isBase64) {
-      return Image.memory(
-        base64Decode(img),
-        width: 72,
-        height: 72,
-        fit: BoxFit.cover,
-      );
+      try {
+        final bytes = base64Decode(img);
+        return Image.memory(bytes, width: 72, height: 72, fit: BoxFit.cover);
+      } catch (_) {
+        return Container(
+          width: 72,
+          height: 72,
+          color: Colors.black12,
+          child: const Icon(Icons.broken_image, size: 32),
+        );
+      }
     } else if (img.startsWith('http')) {
-      return Image.network(
-        img,
-        width: 72,
-        height: 72,
-        fit: BoxFit.cover,
-      );
+      return Image.network(img, width: 72, height: 72, fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            width: 72,
+            height: 72,
+            color: Colors.black12,
+            child: const Icon(Icons.broken_image, size: 32),
+          ));
     } else {
-      return Image.file(
-        File(img),
-        width: 72,
-        height: 72,
-        fit: BoxFit.cover,
-      );
+      final file = File(img);
+      if (!file.existsSync()) {
+        return Container(
+          width: 72,
+          height: 72,
+          color: Colors.black12,
+          child: const Icon(Icons.broken_image, size: 32),
+        );
+      }
+      return Image.file(file, width: 72, height: 72, fit: BoxFit.cover);
     }
   }
 }

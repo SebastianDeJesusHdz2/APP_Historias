@@ -5,17 +5,56 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-// Imports por paquete
 import 'package:apphistorias/models/story.dart';
 import 'package:apphistorias/main.dart'; // StoryProvider
 import 'package:apphistorias/screens/story_detail_screen.dart';
 import 'package:apphistorias/screens/story_form.dart';
+import 'package:apphistorias/screens/settings_screen.dart';
+import 'package:apphistorias/services/local_storage_service.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   final void Function(bool) onThemeToggle;
   final bool isDark;
-
   const HomeScreen({super.key, required this.onThemeToggle, required this.isDark});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  bool _showDeleteHint = true;
+  bool _confirmBeforeDelete = true;
+  bool _loadingPrefs = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrefs();
+  }
+
+  Future<void> _loadPrefs() async {
+    final hint = await LocalStorageService.getPrefBool('showDeleteHint') ?? true;
+    final confirm = await LocalStorageService.getPrefBool('confirmBeforeDelete') ?? true;
+    if (!mounted) return;
+    setState(() {
+      _showDeleteHint = hint;
+      _confirmBeforeDelete = confirm;
+      _loadingPrefs = false;
+    });
+  }
+
+  Future<void> _openSettings() async {
+    final changed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => const SettingsScreen()),
+    );
+    // Si Settings cambió algo relevante, recarga prefs/estado
+    if (changed == true) {
+      await _loadPrefs();
+      // Si borró historias, el provider ya fue limpiado; forzar rebuild
+      if (mounted) setState(() {});
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -23,6 +62,7 @@ class HomeScreen extends StatelessWidget {
     final hasStories = storyProvider.stories.isNotEmpty;
 
     Widget buildHint({EdgeInsets padding = const EdgeInsets.fromLTRB(22, 12, 22, 6)}) {
+      if (!_showDeleteHint || !hasStories) return const SizedBox.shrink();
       final color = Theme.of(context).colorScheme.secondary;
       return Padding(
         padding: padding,
@@ -52,17 +92,19 @@ class HomeScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.settings_rounded),
             tooltip: 'Configuración',
-            onPressed: () => Navigator.pushNamed(context, '/settings'),
+            onPressed: _openSettings,
           ),
           Switch(
-            value: isDark,
-            onChanged: onThemeToggle,
+            value: widget.isDark,
+            onChanged: widget.onThemeToggle,
             activeColor: Theme.of(context).colorScheme.secondary,
             inactiveThumbColor: Theme.of(context).colorScheme.primary,
           ),
         ],
       ),
-      body: !hasStories
+      body: _loadingPrefs
+          ? const Center(child: CircularProgressIndicator())
+          : (!hasStories
           ? Center(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 22),
@@ -81,7 +123,6 @@ class HomeScreen extends StatelessWidget {
           : Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Consejo solo cuando hay historias
           buildHint(),
           Expanded(
             child: ListView.builder(
@@ -89,8 +130,6 @@ class HomeScreen extends StatelessWidget {
               itemCount: storyProvider.stories.length,
               itemBuilder: (context, index) {
                 final story = storyProvider.stories[index];
-
-                // Imagen: base64, url http o archivo local
                 Widget leadingWidget;
                 final img = story.imagePath;
 
@@ -99,17 +138,20 @@ class HomeScreen extends StatelessWidget {
                       !img.startsWith('http') &&
                       !img.contains(Platform.pathSeparator);
                   if (isBase64) {
-                    leadingWidget = ClipRRect(
-                      borderRadius: BorderRadius.circular(14),
-                      child: Image.memory(
-                        base64Decode(img),
-                        width: 56,
-                        height: 56,
-                        fit: BoxFit.cover,
-                        errorBuilder: (ctx, e, s) =>
-                        const Icon(Icons.book_rounded, size: 38),
-                      ),
-                    );
+                    try {
+                      leadingWidget = ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Image.memory(
+                          base64Decode(img),
+                          width: 56,
+                          height: 56,
+                          fit: BoxFit.cover,
+                          errorBuilder: (ctx, e, s) => const Icon(Icons.book_rounded, size: 38),
+                        ),
+                      );
+                    } catch (_) {
+                      leadingWidget = const Icon(Icons.book_rounded, size: 38);
+                    }
                   } else if (img.startsWith('http')) {
                     leadingWidget = ClipRRect(
                       borderRadius: BorderRadius.circular(14),
@@ -118,29 +160,24 @@ class HomeScreen extends StatelessWidget {
                         width: 56,
                         height: 56,
                         fit: BoxFit.cover,
-                        errorBuilder: (ctx, e, s) =>
-                        const Icon(Icons.book_rounded, size: 38),
+                        errorBuilder: (ctx, e, s) => const Icon(Icons.book_rounded, size: 38),
                       ),
                     );
                   } else {
+                    final f = File(img);
                     leadingWidget = ClipRRect(
                       borderRadius: BorderRadius.circular(14),
-                      child: Image.file(
-                        File(img),
-                        width: 56,
-                        height: 56,
-                        fit: BoxFit.cover,
-                        errorBuilder: (ctx, e, s) =>
-                        const Icon(Icons.book_rounded, size: 38),
-                      ),
+                      child: f.existsSync()
+                          ? Image.file(f, width: 56, height: 56, fit: BoxFit.cover,
+                          errorBuilder: (ctx, e, s) => const Icon(Icons.book_rounded, size: 38))
+                          : const Icon(Icons.book_rounded, size: 38),
                     );
                   }
                 } else {
                   leadingWidget = CircleAvatar(
                     backgroundColor: Theme.of(context).colorScheme.secondary,
                     radius: 32,
-                    child: const Icon(Icons.book_rounded,
-                        size: 38, color: Colors.white),
+                    child: const Icon(Icons.book_rounded, size: 38, color: Colors.white),
                   );
                 }
 
@@ -154,44 +191,34 @@ class HomeScreen extends StatelessWidget {
                     child: const Icon(Icons.delete, color: Colors.white, size: 28),
                   ),
                   confirmDismiss: (_) async {
+                    if (!_confirmBeforeDelete) return true;
                     final ok = await showDialog<bool>(
                       context: context,
                       builder: (ctx) => AlertDialog(
                         title: const Text('Eliminar historia'),
-                        content: const Text(
-                          'Esta acción no se puede deshacer, ¿deseas continuar?',
-                        ),
+                        content: const Text('Esta acción no se puede deshacer, ¿deseas continuar?'),
                         actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancelar'),
-                          ),
-                          FilledButton(
-                            onPressed: () => Navigator.pop(ctx, true),
-                            child: const Text('Eliminar'),
-                          ),
+                          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+                          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Eliminar')),
                         ],
                       ),
                     );
                     return ok ?? false;
                   },
-                  onDismissed: (_) {
-                    // Quita del Provider; si queda vacío, desaparece el consejo al reconstruirse
-                    storyProvider.removeStoryAt(index);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Historia eliminada')),
-                    );
+                  onDismissed: (_) async {
+                    await storyProvider.removeStoryAt(index);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Historia eliminada')));
+                      setState(() {}); // por si desaparece el hint
+                    }
                   },
                   child: Card(
                     margin: const EdgeInsets.only(bottom: 22),
                     color: Theme.of(context).colorScheme.surface,
                     elevation: 4,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(22),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
                     child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                          vertical: 18, horizontal: 20),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
                       leading: leadingWidget,
                       title: Text(
                         story.title,
@@ -204,30 +231,12 @@ class HomeScreen extends StatelessWidget {
                       ),
                       subtitle: Text(
                         story.description,
-                        style: TextStyle(
-                          fontSize: 17,
-                          color: Theme.of(context).colorScheme.secondary,
-                        ),
+                        style: TextStyle(fontSize: 17, color: Theme.of(context).colorScheme.secondary),
                       ),
-                      trailing: Icon(
-                        Icons.keyboard_arrow_right_rounded,
-                        color: Theme.of(context).colorScheme.tertiary,
-                        size: 30,
-                      ),
+                      trailing: Icon(Icons.keyboard_arrow_right_rounded, color: Theme.of(context).colorScheme.tertiary, size: 30),
                       onTap: () async {
-                        final result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (ctx) => StoryDetailScreen(story: story),
-                          ),
-                        );
-                        if (result == 'deleted') {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Historia eliminada')),
-                          );
-                        }
-                        Provider.of<StoryProvider>(context, listen: false)
-                            .refresh();
+                        await Navigator.push(context, MaterialPageRoute(builder: (ctx) => StoryDetailScreen(story: story)));
+                        if (mounted) setState(() {}); // refleja cambios al volver
                       },
                     ),
                   ),
@@ -236,21 +245,16 @@ class HomeScreen extends StatelessWidget {
             ),
           ),
         ],
-      ),
+      )),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: Theme.of(context).colorScheme.primary,
         icon: const Icon(Icons.add, color: Colors.white),
-        label: const Text(
-          'Nueva historia',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-        ),
+        label: const Text('Nueva historia', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
         onPressed: () async {
-          final newStory = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (ctx) => StoryForm()),
-          );
+          final newStory = await Navigator.push(context, MaterialPageRoute(builder: (ctx) => StoryForm()));
           if (newStory != null && newStory is Story) {
-            storyProvider.addStory(newStory);
+            await storyProvider.addStory(newStory);
+            if (mounted) setState(() {});
           }
         },
       ),

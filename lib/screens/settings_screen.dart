@@ -1,6 +1,9 @@
 // lib/screens/settings_screen.dart
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
 import '../services/local_storage_service.dart';
+import '../main.dart'; // StoryProvider
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -39,9 +42,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _saveApiKey() async {
     await LocalStorageService.saveApiKey(apiKeyController.text.trim());
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('API key guardada localmente.')),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('API key guardada localmente.')));
+    Navigator.pop(context, true); // notifica a Home para refrescar
   }
 
   Future<bool> _confirm(String title, String message) async {
@@ -72,9 +74,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     if (!mounted) return;
     setState(() => apiKeyController.clear());
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Cachés limpiadas. Historias conservadas.')),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cachés limpiadas. Historias conservadas.')));
+    Navigator.pop(context, true); // avisa a Home
   }
 
   // Borra únicamente historias (no API key).
@@ -85,22 +86,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (!ok) return;
 
+    // 1) Borra en disco
     await LocalStorageService.clearStoriesOnly();
 
+    // 2) Borra en memoria y notifica
+    final provider = Provider.of<StoryProvider>(context, listen: false);
+    provider.stories.clear();
+    await provider.saveAll(); // mantiene consistencia de caja vacía
+
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Historias eliminadas.')),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Historias eliminadas.')));
+    Navigator.pop(context, true); // Home recarga de inmediato
   }
 
   Future<void> _toggleShowDeleteHint(bool v) async {
     setState(() => _showDeleteHint = v);
     await LocalStorageService.setPrefBool('showDeleteHint', v);
+    if (mounted) Navigator.pop(context, true);
   }
 
   Future<void> _toggleConfirmBeforeDelete(bool v) async {
     setState(() => _confirmBeforeDelete = v);
     await LocalStorageService.setPrefBool('confirmBeforeDelete', v);
+    if (mounted) Navigator.pop(context, true);
   }
 
   @override

@@ -3,8 +3,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-// Imports por paquete para evitar duplicados
+// Imports por paquete
 import 'package:apphistorias/models/story.dart';
 import 'package:apphistorias/models/race.dart';
 import 'package:apphistorias/models/character.dart';
@@ -12,9 +13,11 @@ import 'package:apphistorias/models/character.dart';
 import 'package:apphistorias/screens/race_form.dart';
 import 'package:apphistorias/screens/character_form.dart';
 
-import 'package:apphistorias/widgets/race_tile.dart';
-import 'package:apphistorias/widgets/character_tile.dart';
 import 'package:apphistorias/widgets/image_selector.dart';
+
+// Persistencia e imágenes
+import 'package:apphistorias/services/local_storage_service.dart';
+import 'package:apphistorias/main.dart'; // StoryProvider
 
 class StoryDetailScreen extends StatefulWidget {
   final Story story;
@@ -25,48 +28,30 @@ class StoryDetailScreen extends StatefulWidget {
 }
 
 class _StoryDetailScreenState extends State<StoryDetailScreen> {
-  // ================== Helpers ==================
-  Race? _raceById(String? id) {
+  // ========= Utilidades de imagen =========
+  Future<String?> _persistAnyImage(String? img) async {
+    if (img == null || img.isEmpty) return null;
+    final looksBase64 = img.length > 100 && !img.startsWith('http') && !img.contains(Platform.pathSeparator);
     try {
-      return widget.story.races.firstWhere((r) => r.id == id);
+      if (looksBase64) {
+        return await LocalStorageService.saveBase64ToImage(img);
+      } else if (img.startsWith('http')) {
+        return await LocalStorageService.downloadImageToAppDir(Uri.parse(img));
+      } else {
+        return await LocalStorageService.copyImageToAppDir(img);
+      }
     } catch (_) {
       return null;
     }
   }
 
-  // Imagen de historia (solo actualiza; persiste fuera con Provider.saveAll si lo usas)
-  void _actualizaImagen(String img) {
-    setState(() => widget.story.imagePath = img);
-  }
+  Widget _broken(double w, double h) => Container(
+    width: w,
+    height: h,
+    color: Colors.black12,
+    child: Icon(Icons.broken_image, size: h * 0.45, color: Colors.redAccent),
+  );
 
-  // Crear nueva raza
-  Future<void> goToNewRaceForm() async {
-    final newRace = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (ctx) => const RaceForm()),
-    );
-    if (newRace != null && newRace is Race) {
-      setState(() => widget.story.races.add(newRace));
-    }
-  }
-
-  // Crear nuevo personaje para una raza específica
-  Future<void> _newCharacterForRace(Race race) async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (ctx) => CharacterForm(
-          races: widget.story.races,
-          initialRace: race,
-        ),
-      ),
-    );
-    if (result != null && result is Character) {
-      setState(() => race.characters.add(result));
-    }
-  }
-
-  // -------- Helpers Imagen (historia/raza/personaje) --------
   Widget _buildAnyImage(String? img, {double w = 120, double h = 120, BoxFit fit = BoxFit.cover}) {
     if (img == null || img.isEmpty) {
       return Container(
@@ -80,88 +65,49 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
 
     if (looksBase64) {
       try {
-        final bytes = base64Decode(img);
-        return Image.memory(
-          bytes,
-          width: w,
-          height: h,
-          fit: fit,
-          errorBuilder: (ctx, err, stack) => _broken(w, h),
-        );
+        return Image.memory(base64Decode(img), width: w, height: h, fit: fit,
+            errorBuilder: (_, __, ___) => _broken(w, h));
       } catch (_) {
         return _broken(w, h);
       }
     }
     if (img.startsWith('http')) {
-      return Image.network(
-        img,
-        width: w,
-        height: h,
-        fit: fit,
-        errorBuilder: (ctx, err, stack) => _broken(w, h),
-      );
+      return Image.network(img, width: w, height: h, fit: fit,
+          errorBuilder: (_, __, ___) => _broken(w, h));
     }
-    final file = File(img);
-    if (!file.existsSync()) return _broken(w, h);
-    return Image.file(
-      file,
-      width: w,
-      height: h,
-      fit: fit,
-      errorBuilder: (ctx, err, stack) => _broken(w, h),
-    );
+    final f = File(img);
+    if (!f.existsSync()) return _broken(w, h);
+    return Image.file(f, width: w, height: h, fit: fit,
+        errorBuilder: (_, __, ___) => _broken(w, h));
   }
-
-  Widget _broken(double w, double h) => Container(
-    width: w,
-    height: h,
-    color: Colors.black12,
-    child: Icon(Icons.broken_image, size: h * 0.45, color: Colors.redAccent),
-  );
 
   void _showImagePreview(String? img) {
     if (img == null || img.isEmpty) return;
-
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (_) {
         final looksBase64 = img.length > 100 && !img.startsWith('http') && !img.contains(Platform.pathSeparator);
-
-        Widget largeImage;
+        Widget large;
         if (looksBase64) {
           try {
-            largeImage = InteractiveViewer(
-              minScale: 0.8,
-              maxScale: 4.0,
-              child: Image.memory(base64Decode(img), fit: BoxFit.contain),
-            );
+            large = Image.memory(base64Decode(img), fit: BoxFit.contain);
           } catch (_) {
-            largeImage = _broken(double.infinity, 220);
+            large = _broken(double.infinity, 220);
           }
         } else if (img.startsWith('http')) {
-          largeImage = InteractiveViewer(
-            minScale: 0.8,
-            maxScale: 4.0,
-            child: Image.network(img, fit: BoxFit.contain, errorBuilder: (_, __, ___) => _broken(double.infinity, 220)),
-          );
+          large = Image.network(img, fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => _broken(double.infinity, 220));
         } else {
           final f = File(img);
-          largeImage = InteractiveViewer(
-            minScale: 0.8,
-            maxScale: 4.0,
-            child: f.existsSync()
-                ? Image.file(f, fit: BoxFit.contain)
-                : _broken(double.infinity, 220),
-          );
+          large = f.existsSync() ? Image.file(f, fit: BoxFit.contain) : _broken(double.infinity, 220);
         }
-
         return Dialog(
           backgroundColor: Colors.black.withOpacity(0.6),
           insetPadding: const EdgeInsets.all(12),
           child: Stack(
             children: [
-              Center(child: largeImage),
+              Center(child: InteractiveViewer(minScale: 0.8, maxScale: 4.0, child: large)),
               Positioned(
                 top: 8,
                 right: 8,
@@ -177,22 +123,49 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  // ================== Editor / Vista de Raza ==================
-  void _openRaceEditor(Race race) {
+  // ========= Helpers de datos =========
+  Race? _raceById(String? id) {
+    try {
+      return widget.story.races.firstWhere((r) => r.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _persistAll() async {
+    await Provider.of<StoryProvider>(context, listen: false).saveAll();
+  }
+
+  // Imagen de historia (persistente)
+  Future<void> _actualizaImagen(String img) async {
+    final path = await _persistAnyImage(img);
+    setState(() => widget.story.imagePath = path);
+    await _persistAll();
+  }
+
+  // ========= Crear / editar entidades =========
+  Future<void> _crearRaza() async {
+    final newRace = await Navigator.push(context, MaterialPageRoute(builder: (_) => const RaceForm()));
+    if (newRace is Race) {
+      // Normaliza imagen si viene base64/url
+      newRace.imagePath = await _persistAnyImage(newRace.imagePath);
+      setState(() => widget.story.races.add(newRace));
+      await _persistAll();
+    }
+  }
+
+  Future<void> _editarRaza(Race race) async {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
       backgroundColor: Theme.of(context).colorScheme.surface,
-      constraints: BoxConstraints(
-        maxHeight: MediaQuery.of(context).size.height * 0.9,
-      ),
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
       builder: (ctx) {
         final nameCtrl = TextEditingController(text: race.name);
         final descCtrl = TextEditingController(text: race.description);
         String? tempImage = race.imagePath;
-
         final fields = List<RaceFieldDef>.from(race.fields);
 
         return Padding(
@@ -221,22 +194,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                           ),
                         ),
                         const SizedBox(width: 12),
-                        Expanded(
-                          child: ImageSelector(onImageSelected: (img) => setModal(() => tempImage = img)),
-                        ),
+                        Expanded(child: ImageSelector(onImageSelected: (img) => setModal(() => tempImage = img))),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: nameCtrl,
-                      decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder()),
-                    ),
+                    TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nombre', border: OutlineInputBorder())),
                     const SizedBox(height: 10),
-                    TextField(
-                      controller: descCtrl,
-                      maxLines: 3,
-                      decoration: const InputDecoration(labelText: 'Descripción', border: OutlineInputBorder()),
-                    ),
+                    TextField(controller: descCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Descripción', border: OutlineInputBorder())),
                     const SizedBox(height: 16),
                     Row(
                       children: [
@@ -278,8 +242,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                               const SizedBox(height: 10),
                               Row(
                                 children: [
-                                  const Text('Tipo:'),
-                                  const SizedBox(width: 10),
+                                  const Text('Tipo:'), const SizedBox(width: 10),
                                   DropdownButton<RaceFieldType>(
                                     value: f.type,
                                     onChanged: (v) => v != null ? setModal(() => f.type = v) : null,
@@ -290,11 +253,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                                     ],
                                   ),
                                   const Spacer(),
-                                  IconButton(
-                                    onPressed: () => removeField(i),
-                                    icon: const Icon(Icons.delete_forever, color: Colors.red),
-                                    tooltip: 'Eliminar característica',
-                                  ),
+                                  IconButton(onPressed: () => removeField(i), icon: const Icon(Icons.delete_forever, color: Colors.red)),
                                 ],
                               ),
                             ],
@@ -306,18 +265,20 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: () {
+                        onPressed: () async {
                           if (nameCtrl.text.trim().isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El nombre es obligatorio')));
                             return;
                           }
+                          final persisted = await _persistAnyImage(tempImage);
                           setState(() {
                             race.name = nameCtrl.text.trim();
                             race.description = descCtrl.text.trim();
-                            race.imagePath = tempImage;
+                            race.imagePath = persisted;
                             race.fields = fields.where((f) => f.key.trim().isNotEmpty && f.label.trim().isNotEmpty).toList();
                           });
-                          Navigator.pop(ctx);
+                          await _persistAll();
+                          if (context.mounted) Navigator.pop(ctx);
                         },
                         icon: const Icon(Icons.save),
                         label: const Text('Guardar cambios'),
@@ -334,15 +295,14 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  Future<void> _confirmDeleteRace(Race race) async {
-    final count = race.characters.length;
+  Future<void> _eliminarRaza(Race race) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Eliminar raza'),
-        content: Text(count == 0
+        content: Text(race.characters.isEmpty
             ? '¿Seguro que quieres eliminar la raza "${race.name}"?'
-            : 'La raza "${race.name}" tiene $count personaje${count == 1 ? '' : 's'}. Se eliminarán también.'),
+            : 'La raza "${race.name}" tiene ${race.characters.length} personaje(s). Se eliminarán también.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), style: FilledButton.styleFrom(backgroundColor: Colors.red), child: const Text('Eliminar')),
@@ -351,63 +311,25 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
     if (ok == true) {
       setState(() => widget.story.races.removeWhere((r) => r.id == race.id));
+      await _persistAll();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Raza "${race.name}" eliminada')));
     }
   }
 
-  // ================== Vista / Edición de Personaje ==================
-  void _showCharacterPreview(Race race, Character ch) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
-      builder: (ctx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-            left: 16, right: 16, top: 12,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(ch.name, style: Theme.of(context).textTheme.titleLarge),
-                const SizedBox(height: 12),
-                GestureDetector(
-                  onTap: () => _showImagePreview(ch.imagePath),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: _buildAnyImage(ch.imagePath, w: double.infinity, h: 180, fit: BoxFit.cover),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text((ch.description ?? '').isEmpty ? 'Sin descripción.' : (ch.description ?? ''), style: Theme.of(context).textTheme.bodyMedium),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.icon(onPressed: () { Navigator.pop(ctx); _openCharacterEditor(race, ch); }, icon: const Icon(Icons.edit), label: const Text('Editar')),
-                    TextButton.icon(onPressed: () { Navigator.pop(ctx); _confirmDeleteCharacter(race, ch); },
-                        icon: const Icon(Icons.delete_forever, color: Colors.red),
-                        label: const Text('Eliminar', style: TextStyle(color: Colors.red))),
-                    OutlinedButton.icon(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close), label: const Text('Cerrar')),
-                  ],
-                ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-        );
-      },
+  Future<void> _crearPersonaje(Race race) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CharacterForm(races: widget.story.races, initialRace: race)),
     );
+    if (result is Character) {
+      result.imagePath = await _persistAnyImage(result.imagePath);
+      setState(() => race.characters.add(result));
+      await _persistAll();
+    }
   }
 
-  void _openCharacterEditor(Race currentRace, Character ch) {
+  Future<void> _editarPersonaje(Race currentRace, Character ch) async {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -466,16 +388,17 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: () {
+                        onPressed: () async {
                           final name = nameCtrl.text.trim();
                           if (name.isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('El nombre es obligatorio')));
                             return;
                           }
+                          final persisted = await _persistAnyImage(tempImage);
                           setState(() {
                             ch.name = name;
                             ch.description = descCtrl.text.trim();
-                            ch.imagePath = tempImage;
+                            ch.imagePath = persisted;
                             if (ch.raceId != selectedRace.id) {
                               final oldRace = _raceById(ch.raceId) ?? currentRace;
                               oldRace.characters.removeWhere((c) => c.id == ch.id);
@@ -483,9 +406,11 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                               selectedRace.characters.add(ch);
                             }
                           });
-                          Navigator.pop(ctx);
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Personaje actualizado')));
+                          await _persistAll();
+                          if (context.mounted) {
+                            Navigator.pop(ctx);
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Personaje actualizado')));
+                          }
                         },
                         icon: const Icon(Icons.save),
                         label: const Text('Guardar cambios'),
@@ -502,7 +427,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
   }
 
-  Future<void> _confirmDeleteCharacter(Race race, Character ch) async {
+  Future<void> _eliminarPersonaje(Race race, Character ch) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -516,12 +441,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
     );
     if (ok == true) {
       setState(() => race.characters.removeWhere((c) => c.id == ch.id));
+      await _persistAll();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Personaje "${ch.name}" eliminado')));
     }
   }
 
-  // ================== UI ==================
+  // ========= UI =========
   @override
   Widget build(BuildContext context) {
     final leftColumn = [
@@ -536,7 +462,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
         children: [
           const Text('Razas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           const Spacer(),
-          TextButton.icon(onPressed: goToNewRaceForm, icon: const Icon(Icons.add), label: const Text('Nueva Raza')),
+          TextButton.icon(onPressed: _crearRaza, icon: const Icon(Icons.add), label: const Text('Nueva Raza')),
         ],
       ),
       const SizedBox(height: 6),
@@ -555,8 +481,8 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
             trailing: Wrap(
               spacing: 6,
               children: [
-                IconButton(tooltip: 'Editar', onPressed: () => _openRaceEditor(race), icon: const Icon(Icons.edit)),
-                IconButton(tooltip: 'Eliminar raza', onPressed: () => _confirmDeleteRace(race), icon: const Icon(Icons.delete_forever, color: Colors.red)),
+                IconButton(tooltip: 'Editar', onPressed: () => _editarRaza(race), icon: const Icon(Icons.edit)),
+                IconButton(tooltip: 'Eliminar raza', onPressed: () => _eliminarRaza(race), icon: const Icon(Icons.delete_forever, color: Colors.red)),
               ],
             ),
           ),
@@ -584,8 +510,8 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
             trailing: Wrap(
               spacing: 8,
               children: [
-                TextButton.icon(onPressed: () => _newCharacterForRace(race), icon: const Icon(Icons.add), label: const Text('Agregar')),
-                IconButton(tooltip: 'Eliminar raza', onPressed: () => _confirmDeleteRace(race), icon: const Icon(Icons.delete_forever, color: Colors.red)),
+                TextButton.icon(onPressed: () => _crearPersonaje(race), icon: const Icon(Icons.add), label: const Text('Agregar')),
+                IconButton(tooltip: 'Eliminar raza', onPressed: () => _eliminarRaza(race), icon: const Icon(Icons.delete_forever, color: Colors.red)),
               ],
             ),
             children: [
@@ -606,13 +532,12 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
                           ? 'Sin descripción'
                           : (ch.description!.length > 80 ? '${ch.description!.substring(0, 80)}...' : ch.description!),
                     ),
-                    onTap: () => _showCharacterPreview(race, ch),
+                    onTap: () => _editarPersonaje(race, ch),
                     trailing: Wrap(
                       spacing: 6,
                       children: [
-                        IconButton(tooltip: 'Ver', onPressed: () => _showCharacterPreview(race, ch), icon: const Icon(Icons.visibility)),
-                        IconButton(tooltip: 'Editar', onPressed: () => _openCharacterEditor(race, ch), icon: const Icon(Icons.edit)),
-                        IconButton(tooltip: 'Eliminar', onPressed: () => _confirmDeleteCharacter(race, ch), icon: const Icon(Icons.delete_forever, color: Colors.red)),
+                        IconButton(tooltip: 'Editar', onPressed: () => _editarPersonaje(race, ch), icon: const Icon(Icons.edit)),
+                        IconButton(tooltip: 'Eliminar', onPressed: () => _eliminarPersonaje(race, ch), icon: const Icon(Icons.delete_forever, color: Colors.red)),
                       ],
                     ),
                   ),
@@ -624,7 +549,7 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
       }),
     ];
 
-    // Responsive: móvil 1 columna; tablet/desktop 2 columnas
+    // Responsive
     return LayoutBuilder(
       builder: (context, constraints) {
         final isMobile = constraints.maxWidth < 700;
@@ -633,25 +558,13 @@ class _StoryDetailScreenState extends State<StoryDetailScreen> {
           body: Padding(
             padding: const EdgeInsets.all(16),
             child: isMobile
-                ? ListView(
-              children: [
-                ...leftColumn,
-                const SizedBox(height: 24),
-                ...rightColumn,
-              ],
-            )
+                ? ListView(children: [...leftColumn, const SizedBox(height: 24), ...rightColumn])
                 : Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  flex: 12,
-                  child: ListView(children: leftColumn),
-                ),
+                Expanded(flex: 12, child: ListView(children: leftColumn)),
                 const SizedBox(width: 24),
-                Expanded(
-                  flex: 18,
-                  child: ListView(children: rightColumn),
-                ),
+                Expanded(flex: 18, child: ListView(children: rightColumn)),
               ],
             ),
           ),
